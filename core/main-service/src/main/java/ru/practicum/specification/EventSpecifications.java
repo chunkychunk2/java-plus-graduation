@@ -3,6 +3,7 @@ package ru.practicum.specification;
 import jakarta.persistence.criteria.Path;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.util.CollectionUtils;
 import ru.practicum.entity.Event;
 import ru.practicum.entity.EventState;
 import ru.practicum.parameters.EventAdminSearchParam;
@@ -10,13 +11,13 @@ import ru.practicum.parameters.PublicSearchParam;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.stream.Collectors;
+
 
 public class EventSpecifications {
     public static Specification<Event> userIdIs(List<Long> userIds) {
         return (root, query, criteriaBuilder) -> {
-            if (userIds == null || userIds.isEmpty()) {
-                return criteriaBuilder.conjunction(); // Всегда истина
+            if (CollectionUtils.isEmpty(userIds)) {
+                return criteriaBuilder.conjunction();
             }
             Path<Long> initiatorIdPath = root.get("initiator").get("id");
             return initiatorIdPath.in(userIds);
@@ -25,7 +26,7 @@ public class EventSpecifications {
 
     public static Specification<Event> categories(List<Long> categories) {
         return (root, query, criteriaBuilder) -> {
-            if (categories == null || categories.isEmpty()) {
+            if (CollectionUtils.isEmpty(categories)) {
                 return criteriaBuilder.conjunction();
             }
             Path<Long> categoryIdPath = root.get("category").get("id");
@@ -35,13 +36,11 @@ public class EventSpecifications {
 
     public static Specification<Event> states(List<EventState> states) {
         return (root, query, criteriaBuilder) -> {
-            if (states == null || states.isEmpty()) {
+            if (CollectionUtils.isEmpty(states)) {
                 return criteriaBuilder.conjunction();
             }
-            Path<String> statePath = root.get("state");
-            return statePath.in(states.stream()
-                    .map(Enum::name)
-                    .collect(Collectors.toList()));
+            Path<EventState> statePath = root.get("state");
+            return statePath.in(states);
         };
     }
 
@@ -72,7 +71,7 @@ public class EventSpecifications {
     public static Specification<Event> textInAnnotationOrDescription(String text) {
         return (root, query, criteriaBuilder) -> {
             if (text == null || text.isBlank()) {
-                return criteriaBuilder.conjunction(); // Игнорируем пустой текст
+                return criteriaBuilder.conjunction();
             }
 
             Predicate annotationPredicate = criteriaBuilder.like(
@@ -104,5 +103,5 @@ public class EventSpecifications {
                 .and(EventSpecifications.startAfter(params.getRangeStart()))
                 .and(EventSpecifications.states(List.of(EventState.PUBLISHED)));
     }
-
 }
+

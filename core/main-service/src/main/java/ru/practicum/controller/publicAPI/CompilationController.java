@@ -25,7 +25,6 @@ public class CompilationController {
                 .from(from)
                 .build();
 
-        log.info("GET /compilations called");
         List<CompilationDto> compilations = compilationService.getAllCompilations(param.getPageable());
         log.info("Returned {} compilations", compilations.size());
         return compilations;
@@ -33,7 +32,6 @@ public class CompilationController {
 
     @GetMapping("/{compId}")
     public CompilationDto getCompilationById(@PathVariable Long compId) {
-        log.info("GET /compilations/{} called", compId);
         CompilationDto compilation = compilationService.getCompilationById(compId);
         log.info("Returned compilation: id={}, title={}", compilation.getId(), compilation.getTitle());
         return compilation;
