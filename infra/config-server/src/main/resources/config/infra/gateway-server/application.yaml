@@ -1,17 +1,84 @@
-server:
-  port: 8080
-
 spring:
   cloud:
     gateway:
       discovery.locator.enabled: true
       routes:
+        # =============================================
+        # COMMENT SERVICE (комментарии) - БОЛЕЕ СПЕЦИФИЧНЫЕ ПУТИ ВЫШЕ
+        # =============================================
+        - id: comment_service_private_event
+          uri: lb://comment-service
+          predicates:
+            - Path=/users/*/events/*/comments/**
+
+        - id: comment_service_private_user
+          uri: lb://comment-service
+          predicates:
+            - Path=/users/*/comments/**
+
+        - id: comment_service_admin
+          uri: lb://comment-service
+          predicates:
+            - Path=/admin/comments/**
+
+        # =============================================
+        # EVENT SERVICE (основной сервис событий)
+        # =============================================
+        - id: event_service_private_events
+          uri: lb://event-service
+          predicates:
+            - Path=/users/*/events/**
+
+        - id: event_service_admin_categories
+          uri: lb://event-service
+          predicates:
+            - Path=/admin/categories/**
+
+        - id: event_service_admin_events
+          uri: lb://event-service
+          predicates:
+            - Path=/admin/events/**
+
+        - id: event_service_admin_compilations
+          uri: lb://event-service
+          predicates:
+            - Path=/admin/compilations/**
+
+        - id: event_service_public_categories
+          uri: lb://event-service
+          predicates:
+            - Path=/categories/**
+
+        - id: event_service_public_compilations
+          uri: lb://event-service
+          predicates:
+            - Path=/compilations/**
+
+        - id: event_service_public_events
+          uri: lb://event-service
+          predicates:
+            - Path=/events/**
+
+        # =============================================
+        # REQUEST SERVICE (запросы на участие)
+        # =============================================
+        - id: request_service_private_requests
+          uri: lb://request-service
+          predicates:
+            - Path=/users/*/requests/**
+
+        # =============================================
+        # USER SERVICE (админка пользователей)
+        # =============================================
+        - id: user_service_admin_users
+          uri: lb://user-service
+          predicates:
+            - Path=/admin/users/**
+
+        # =============================================
+        # STAT SERVICE (статистика)
+        # =============================================
         - id: stat_service_route
-          uri: lb://stats-server
+          uri: lb://stat-service
           predicates:
             - Path=/hit/**,/stats/**
-
-        - id: main_service_route
-          uri: lb://main-service
-          predicates:
-            - Path=/admin/**,/users/**,/categories/**,/compilations/**,/events/**

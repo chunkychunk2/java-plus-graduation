@@ -1,18 +1,25 @@
 server:
   port: 0
 
+stats:
+  server:
+    name: STATS-SERVER
+
 spring:
   sql:
     init:
       mode: always
   datasource:
-    driverClassName: org.postgresql.Driver
-    url: jdbc:postgresql://localhost:5433/stat_db
-    username: postgres
-    password: postgres
+    driverClassName: "org.postgresql.Driver"
+    url: "jdbc:postgresql://localhost:5433/core_user_service_db"
+    username: "postgres"
+    password: "postgres"
   jpa:
     show-sql: true
     "properties.hibernate.format_sql": true
+  jackson:
+    "serialization.write-dates-as-timestamps": false
+
 logging:
   level:
     "org.zalando.logbook": TRACE
