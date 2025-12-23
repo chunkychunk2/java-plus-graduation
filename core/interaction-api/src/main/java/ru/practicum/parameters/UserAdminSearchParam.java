@@ -1,14 +1,23 @@
 package ru.practicum.parameters;
 
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Getter;
-import lombok.experimental.SuperBuilder;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 
 import java.util.List;
 
 @AllArgsConstructor
-@SuperBuilder
+@Builder
 @Getter
-public class UserAdminSearchParam extends PageableParam {
+public class UserAdminSearchParam {
     private List<Long> ids;
+    private Integer from;
+    private Integer size;
+
+    public Pageable getPageable() {
+        int page = from / size;
+        return PageRequest.of(page, size);
+    }
 }

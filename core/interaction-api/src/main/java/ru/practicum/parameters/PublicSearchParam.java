@@ -1,9 +1,9 @@
 package ru.practicum.parameters;
 
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.Setter;
-import lombok.experimental.SuperBuilder;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -12,11 +12,11 @@ import ru.practicum.dto.event.SortSearchParam;
 import java.time.LocalDateTime;
 import java.util.List;
 
-@SuperBuilder
+@Builder
 @Getter
 @Setter
 @AllArgsConstructor
-public class PublicSearchParam extends PageableParam {
+public class PublicSearchParam {
     private String text;
     private List<Long> categories;
     private Boolean paid;
@@ -24,14 +24,15 @@ public class PublicSearchParam extends PageableParam {
     private LocalDateTime rangeEnd;
     private Boolean onlyAvailable;
     private SortSearchParam sort;
+    private Integer from;
+    private Integer size;
 
-    @Override
     public Pageable getPageable() {
-        int page = getFrom() / getSize();
+        int page = from / size;
         if (sort == SortSearchParam.EVENT_DATE) {
-            return PageRequest.of(page, getSize(), Sort.by("eventDate"));
+            return PageRequest.of(page, size, Sort.by("eventDate"));
         } else {
-            return PageRequest.of(page, getSize());
+            return PageRequest.of(page, size);
         }
     }
 }

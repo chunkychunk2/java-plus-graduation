@@ -25,6 +25,7 @@ public class CategoryController {
                 .from(from)
                 .build();
 
+        log.info("GET /categories called");
         List<CategoryDto> categories = categoryService.getAllCategories(param.getPageable());
         log.info("Returned {} categories", categories.size());
         return categories;
@@ -32,6 +33,7 @@ public class CategoryController {
 
     @GetMapping("/{catId}")
     public CategoryDto getCategoryById(@PathVariable Long catId) {
+        log.info("GET /categories/{} called", catId);
         CategoryDto category = categoryService.getCategoryById(catId);
         log.info("Returned category: id={}, name={}", category.getId(), category.getName());
         return category;
