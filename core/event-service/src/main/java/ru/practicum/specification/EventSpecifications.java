@@ -3,6 +3,7 @@ package ru.practicum.specification;
 import jakarta.persistence.criteria.Path;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.util.CollectionUtils;
 import ru.practicum.dto.event.EventState;
 import ru.practicum.entity.Event;
 import ru.practicum.parameters.EventAdminSearchParam;
@@ -15,7 +16,7 @@ import java.util.stream.Collectors;
 public class EventSpecifications {
     public static Specification<Event> userIdIs(List<Long> userIds) {
         return (root, query, criteriaBuilder) -> {
-            if (userIds == null || userIds.isEmpty()) {
+            if (CollectionUtils.isEmpty(userIds)) {
                 return criteriaBuilder.conjunction();
             }
             Path<Long> initiatorIdPath = root.get("initiator");
@@ -25,7 +26,7 @@ public class EventSpecifications {
 
     public static Specification<Event> categories(List<Long> categories) {
         return (root, query, criteriaBuilder) -> {
-            if (categories == null || categories.isEmpty()) {
+            if (CollectionUtils.isEmpty(categories)) {
                 return criteriaBuilder.conjunction();
             }
             Path<Long> categoryIdPath = root.get("category").get("id");
@@ -35,13 +36,11 @@ public class EventSpecifications {
 
     public static Specification<Event> states(List<EventState> states) {
         return (root, query, criteriaBuilder) -> {
-            if (states == null || states.isEmpty()) {
+            if (CollectionUtils.isEmpty(states)) {
                 return criteriaBuilder.conjunction();
             }
-            Path<String> statePath = root.get("state");
-            return statePath.in(states.stream()
-                    .map(Enum::name)
-                    .collect(Collectors.toList()));
+            Path<EventState> statePath = root.get("state");
+            return statePath.in(states);
         };
     }
 
