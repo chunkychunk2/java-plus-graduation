@@ -7,9 +7,9 @@ spring:
       mode: always
   datasource:
     driverClassName: org.postgresql.Driver
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5433/postgres}
-    username: ${SPRING_DATASOURCE_USERNAME:postgres}
-    password: ${SPRING_DATASOURCE_PASSWORD:postgres}
+    url: jdbc:postgresql://localhost:5433/stat_db
+    username: postgres
+    password: postgres
   jpa:
     show-sql: true
     "properties.hibernate.format_sql": true

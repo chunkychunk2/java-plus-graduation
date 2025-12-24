@@ -12,6 +12,13 @@
 
     <name>core</name>
     <url>http://maven.apache.org</url>
+    <modules>
+        <module>user-service</module>
+        <module>interaction-api</module>
+        <module>event-service</module>
+        <module>request-service</module>
+        <module>comment-service</module>
+    </modules>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
