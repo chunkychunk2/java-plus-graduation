@@ -6,13 +6,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
-import ru.practicum.aop.ClientErrorHandler;
-import ru.practicum.client.RequestClient;
-import ru.practicum.client.StatsClient;
+
 import ru.practicum.client.UserClient;
-import ru.practicum.dto.StatsDto;
 import ru.practicum.dto.event.*;
-import ru.practicum.dto.request.RequestStatus;
 import ru.practicum.entity.Category;
 import ru.practicum.entity.Event;
 import ru.practicum.exception.ConflictException;
@@ -41,11 +37,9 @@ import static ru.practicum.specification.EventSpecifications.eventPublicSearchPa
 public class EventService {
 
     private final EventRepository eventRepository;
-    private final RequestClient requestClient;
-    private final StatsClient statsClient;
     private final EventMapper eventMapper;
-
     private final UserClient userClient;
+    private final EventStatsEnricherService eventStatsEnricherService;
 
     public List<EventShortDto> getUsersEvents(EventUserSearchParam params) {
         Page<Event> events = eventRepository.findByInitiator(params.getUserId(), params.getPageable());
@@ -53,9 +47,8 @@ public class EventService {
         List<EventShortDto> result = events.stream()
                 .map(eventMapper::toShortDto)
                 .toList();
-        enrichWithStatsEventShortDto(result);
+        eventStatsEnricherService.enrichWithStatsEventShortDto(result);
         return result;
-
     }
 
     @Transactional
@@ -70,7 +63,6 @@ public class EventService {
     }
 
     public List<EventShortDto> searchEvents(PublicSearchParam param) {
-
         Page<Event> events = eventRepository.findAll(eventPublicSearchParamSpec(param), param.getPageable());
         Map<Long, Event> eventsMap = events.stream().collect(toMap(Event::getId, Function.identity()));
 
@@ -78,11 +70,14 @@ public class EventService {
                 .map(eventMapper::toShortDto)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
-        enrichWithStatsEventShortDto(eventShortDtos);
+        eventStatsEnricherService.enrichWithStatsEventShortDto(eventShortDtos);
 
         if (param.getOnlyAvailable()) {
             eventShortDtos = eventShortDtos.stream()
-                    .filter(dto -> dto.getConfirmedRequests() >= eventsMap.get(dto.getId()).getParticipantLimit())
+                    .filter(dto -> {
+                        Event originalEvent = eventsMap.get(dto.getId());
+                        return originalEvent != null && dto.getConfirmedRequests() < originalEvent.getParticipantLimit();
+                    })
                     .collect(Collectors.toList());
         }
         if (param.getSort() == SortSearchParam.VIEWS) {
@@ -95,7 +90,7 @@ public class EventService {
         Event event = eventRepository.findByIdAndState(id, EventState.PUBLISHED)
                 .orElseThrow(() -> new NotFoundException("Событие не найдено или не опубликовано"));
         EventFullDto dto = eventMapper.toFullDto(event);
-        enrichWithStats(dto);
+        eventStatsEnricherService.enrichWithStats(dto);
         return dto;
     }
 
@@ -103,7 +98,7 @@ public class EventService {
         Event event = eventRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Событие id" + id + "не найдено"));
         EventFullDto dto = eventMapper.toFullDto(event);
-        enrichWithStats(dto);
+        eventStatsEnricherService.enrichWithStats(dto);
         return dto;
     }
 
@@ -115,7 +110,7 @@ public class EventService {
         }
 
         EventFullDto dto = eventMapper.toFullDto(event);
-        enrichWithStats(dto);
+        eventStatsEnricherService.enrichWithStats(dto);
         return dto;
     }
 
@@ -124,7 +119,7 @@ public class EventService {
         Event eventToUpdate = eventRepository.findById(eventId)
                 .orElseThrow(() -> new NotFoundException("Событие не найдено id=" + eventId));
         if (!Objects.equals(eventToUpdate.getInitiator(), userId) ||
-            eventToUpdate.getState() == EventState.PUBLISHED) {
+                eventToUpdate.getState() == EventState.PUBLISHED) {
             throw new ConflictException("Событие добавленно не теущем пользователем или уже было опубликовано");
         }
         updateNouNullFields(eventToUpdate, event);
@@ -137,7 +132,7 @@ public class EventService {
         Event updated = eventRepository.save(eventToUpdate);
 
         EventFullDto result = eventMapper.toFullDto(updated);
-        enrichWithStats(result);
+        eventStatsEnricherService.enrichWithStats(result);
         return result;
     }
 
@@ -145,10 +140,9 @@ public class EventService {
         Page<Event> searched = eventRepository.findAll(eventAdminSearchParamSpec(params), params.getPageable());
 
         List<EventFullDto> result = searched.stream()
-                .limit(params.getSize())
                 .map(eventMapper::toFullDto)
                 .toList();
-        enrichWithStatsEventFullDto(result);
+        eventStatsEnricherService.enrichWithStatsEventFullDto(result);
         return result;
     }
 
@@ -166,15 +160,17 @@ public class EventService {
             throw new ConflictException("To late to change event");
         }
         updateNouNullFields(event, updateRequest);
-        event.setState(updateRequest.getStateAction() == AdminEventAction.PUBLISH_EVENT ? EventState.PUBLISHED : EventState.CANCELED);
-        if (event.getState() == EventState.PUBLISHED &&
-            updateRequest.getStateAction() == AdminEventAction.PUBLISH_EVENT) {
+        if (updateRequest.getStateAction() == AdminEventAction.PUBLISH_EVENT) {
+            event.setState(EventState.PUBLISHED);
             event.setPublishedOn(LocalDateTime.now());
+        } else if (updateRequest.getStateAction() == AdminEventAction.REJECT_EVENT) {
+            event.setState(EventState.CANCELED);
         }
+
         Event updated = eventRepository.save(event);
 
         EventFullDto dto = eventMapper.toFullDto(updated);
-        enrichWithStats(dto);
+        eventStatsEnricherService.enrichWithStats(dto);
 
         return dto;
     }
@@ -183,40 +179,6 @@ public class EventService {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new NotFoundException("Event id=" + eventId + "not found"));
         return eventMapper.toEventShotCommentDto(event);
-    }
-
-    @ClientErrorHandler
-    private void enrichWithStats(EventFullDto dto) {
-        Long eventId = dto.getId();
-        Map<Long, Long> views = getViews(List.of(eventId));
-        Map<Long, Long> confirmedRequests = requestClient.countRequestsByEventIdsAndStatus(List.of(eventId),
-                RequestStatus.CONFIRMED);
-        dto.setViews(views.get(eventId));
-        dto.setConfirmedRequests(confirmedRequests.get(eventId));
-    }
-
-    @ClientErrorHandler
-    private void enrichWithStatsEventFullDto(List<EventFullDto> dtos) {
-        List<Long> ids = dtos.stream().map(EventFullDto::getId).toList();
-        Map<Long, Long> views = getViews(ids);
-        Map<Long, Long> confirmedRequests = requestClient.countRequestsByEventIdsAndStatus(ids,
-                RequestStatus.CONFIRMED);
-        dtos.forEach(dto -> {
-            dto.setConfirmedRequests(confirmedRequests.get(dto.getId()) == null ? 0 : confirmedRequests.get(dto.getId()));
-            dto.setViews(views.get(dto.getId()) == null ? 0 : views.get(dto.getId()));
-        });
-    }
-
-    @ClientErrorHandler
-    private void enrichWithStatsEventShortDto(List<EventShortDto> dtos) {
-        List<Long> ids = dtos.stream().map(EventShortDto::getId).toList();
-        Map<Long, Long> views = getViews(ids);
-        Map<Long, Long> confirmedRequests = requestClient.countRequestsByEventIdsAndStatus(ids,
-                RequestStatus.CONFIRMED);
-        dtos.forEach(dto -> {
-            dto.setConfirmedRequests(confirmedRequests.get(dto.getId()) == null ? 0 : confirmedRequests.get(dto.getId()));
-            dto.setViews(views.get(dto.getId()) == null ? 0 : views.get(dto.getId()));
-        });
     }
 
     private void updateNouNullFields(Event eventToUpdate, UpdateEventRequest event) {
@@ -232,20 +194,5 @@ public class EventService {
         if (event.getParticipantLimit() != null) eventToUpdate.setParticipantLimit(event.getParticipantLimit());
         if (event.getRequestModeration() != null) eventToUpdate.setRequestModeration(event.getRequestModeration());
         if (event.getTitle() != null) eventToUpdate.setTitle(event.getTitle());
-    }
-
-    /**
-     * Getting stats from stats client
-     */
-    private Map<Long, Long> getViews(List<Long> eventIds) {
-        List<StatsDto> stats = statsClient.getStats(
-                "2000-01-01 00:00:00",
-                "2100-01-01 00:00:00",
-                eventIds.stream().map(id -> "/events/" + id).toList(),
-                true);
-        return stats.stream()
-                .filter(statsDto -> !statsDto.getUri().equals("/events"))
-                .collect(toMap(statDto ->
-                        Long.parseLong(statDto.getUri().replace("/events/", "")), StatsDto::getHits));
     }
 }
