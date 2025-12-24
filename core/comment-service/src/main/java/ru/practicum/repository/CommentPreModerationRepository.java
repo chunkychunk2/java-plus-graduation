@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.CollectionUtils;
 
 import java.util.HashSet;
 import java.util.List;
@@ -18,13 +19,12 @@ public class CommentPreModerationRepository {
 
     public Set<String> forbiddenWordsByEventId(Long eventId) {
         String sql = "SELECT forbidden_word FROM comment_pre_moderation WHERE event_id = ?";
-
         return new HashSet<>(jdbcTemplate.queryForList(sql, String.class, eventId));
     }
 
     @Transactional
     public void updateForbiddenWords(Long eventId, Set<String> forbiddenWords) {
-        if (forbiddenWords == null || forbiddenWords.isEmpty()) {
+        if (CollectionUtils.isEmpty(forbiddenWords)) {
             return;
         }
 
@@ -34,9 +34,9 @@ public class CommentPreModerationRepository {
                 .filter(word -> !existingWords.contains(word))
                 .collect(Collectors.toSet());
 
-        if (!newWords.isEmpty()) {
+        if (!CollectionUtils.isEmpty(newWords)) {
             String insertSql = "INSERT INTO comment_pre_moderation (event_id, forbidden_word) VALUES (?, ?)";
-            List<Object[]> batchArgs = forbiddenWords.stream()
+            List<Object[]> batchArgs = newWords.stream()
                     .map(word -> new Object[]{eventId, word})
                     .collect(Collectors.toList());
             jdbcTemplate.batchUpdate(insertSql, batchArgs);
