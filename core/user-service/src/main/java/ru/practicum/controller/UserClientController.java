@@ -24,15 +24,17 @@ public class UserClientController {
 
     @GetMapping
     public UserDto getUserById(@RequestParam @NotNull @Positive Long userId) {
+        log.info("Getting UserDto in UserClientController id={}", userId);
         UserDto userById = userService.getUserById(userId);
-        log.info("Retrieved UserDto for id={}: {}", userId, userById);
+        log.info("Returning UserDto in UserClientController dto={}", userById);
         return userById;
     }
 
     @GetMapping("/short")
     public UserShortDto getUserShortDroById(@RequestParam @NotNull @Positive Long userId) {
+        log.info("Getting UserShortDto in UserClientController id={}", userId);
         UserShortDto userShortDtoById = userService.getUserShortDtoById(userId);
-        log.info("Retrieved UserShortDto for id={}: {}", userId, userShortDtoById);
+        log.info("Returning UserShortDto in UserClientController dto={}", userShortDtoById);
         return userShortDtoById;
     }
 }

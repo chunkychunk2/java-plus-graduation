@@ -6,11 +6,17 @@ import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
-
+import ru.practicum.aop.ClientErrorHandler;
+import ru.practicum.client.AnalyzerClient;
+import ru.practicum.client.RequestClient;
 import ru.practicum.client.UserClient;
 import ru.practicum.dto.event.*;
+import ru.practicum.dto.request.RequestStatus;
 import ru.practicum.entity.Category;
 import ru.practicum.entity.Event;
+import ru.practicum.ewm.stats.proto.InteractionsCountRequestProto;
+import ru.practicum.ewm.stats.proto.RecommendedEventProto;
+import ru.practicum.ewm.stats.proto.UserPredictionsRequestProto;
 import ru.practicum.exception.ConflictException;
 import ru.practicum.exception.NotFoundException;
 import ru.practicum.mapper.EventMapper;
@@ -20,10 +26,7 @@ import ru.practicum.parameters.PublicSearchParam;
 import ru.practicum.repository.EventRepository;
 
 import java.time.LocalDateTime;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -37,9 +40,11 @@ import static ru.practicum.specification.EventSpecifications.eventPublicSearchPa
 public class EventService {
 
     private final EventRepository eventRepository;
+    private final RequestClient requestClient;
     private final EventMapper eventMapper;
+    private final AnalyzerClient analyzerClient;
+
     private final UserClient userClient;
-    private final EventStatsEnricherService eventStatsEnricherService;
 
     public List<EventShortDto> getUsersEvents(EventUserSearchParam params) {
         Page<Event> events = eventRepository.findByInitiator(params.getUserId(), params.getPageable());
@@ -47,8 +52,9 @@ public class EventService {
         List<EventShortDto> result = events.stream()
                 .map(eventMapper::toShortDto)
                 .toList();
-        eventStatsEnricherService.enrichWithStatsEventShortDto(result);
+        enrichWithStatsEventShortDto(result);
         return result;
+
     }
 
     @Transactional
@@ -57,12 +63,13 @@ public class EventService {
         userClient.getUserShortDroById(userId);
         Event saved = eventRepository.saveAndFlush(eventMapper.toEntity(dto, userId));
         EventFullDto fullDto = eventMapper.toFullDto(saved);
-        fullDto.setViews(0L);
+        fullDto.setRating(0.);
         fullDto.setConfirmedRequests(0L);
         return fullDto;
     }
 
     public List<EventShortDto> searchEvents(PublicSearchParam param) {
+
         Page<Event> events = eventRepository.findAll(eventPublicSearchParamSpec(param), param.getPageable());
         Map<Long, Event> eventsMap = events.stream().collect(toMap(Event::getId, Function.identity()));
 
@@ -70,18 +77,15 @@ public class EventService {
                 .map(eventMapper::toShortDto)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
-        eventStatsEnricherService.enrichWithStatsEventShortDto(eventShortDtos);
+        enrichWithStatsEventShortDto(eventShortDtos);
 
         if (param.getOnlyAvailable()) {
             eventShortDtos = eventShortDtos.stream()
-                    .filter(dto -> {
-                        Event originalEvent = eventsMap.get(dto.getId());
-                        return originalEvent != null && dto.getConfirmedRequests() < originalEvent.getParticipantLimit();
-                    })
+                    .filter(dto -> dto.getConfirmedRequests() >= eventsMap.get(dto.getId()).getParticipantLimit())
                     .collect(Collectors.toList());
         }
-        if (param.getSort() == SortSearchParam.VIEWS) {
-            eventShortDtos.sort(Comparator.comparingLong(EventShortDto::getViews));
+        if (param.getSort() == SortSearchParam.RATING) {
+            eventShortDtos.sort(Comparator.comparingDouble(EventShortDto::getRating));
         }
         return eventShortDtos;
     }
@@ -90,7 +94,7 @@ public class EventService {
         Event event = eventRepository.findByIdAndState(id, EventState.PUBLISHED)
                 .orElseThrow(() -> new NotFoundException("Событие не найдено или не опубликовано"));
         EventFullDto dto = eventMapper.toFullDto(event);
-        eventStatsEnricherService.enrichWithStats(dto);
+        enrichWithStats(dto);
         return dto;
     }
 
@@ -98,7 +102,7 @@ public class EventService {
         Event event = eventRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Событие id" + id + "не найдено"));
         EventFullDto dto = eventMapper.toFullDto(event);
-        eventStatsEnricherService.enrichWithStats(dto);
+        enrichWithStats(dto);
         return dto;
     }
 
@@ -110,7 +114,7 @@ public class EventService {
         }
 
         EventFullDto dto = eventMapper.toFullDto(event);
-        eventStatsEnricherService.enrichWithStats(dto);
+        enrichWithStats(dto);
         return dto;
     }
 
@@ -119,7 +123,7 @@ public class EventService {
         Event eventToUpdate = eventRepository.findById(eventId)
                 .orElseThrow(() -> new NotFoundException("Событие не найдено id=" + eventId));
         if (!Objects.equals(eventToUpdate.getInitiator(), userId) ||
-                eventToUpdate.getState() == EventState.PUBLISHED) {
+            eventToUpdate.getState() == EventState.PUBLISHED) {
             throw new ConflictException("Событие добавленно не теущем пользователем или уже было опубликовано");
         }
         updateNouNullFields(eventToUpdate, event);
@@ -132,7 +136,7 @@ public class EventService {
         Event updated = eventRepository.save(eventToUpdate);
 
         EventFullDto result = eventMapper.toFullDto(updated);
-        eventStatsEnricherService.enrichWithStats(result);
+        enrichWithStats(result);
         return result;
     }
 
@@ -140,9 +144,10 @@ public class EventService {
         Page<Event> searched = eventRepository.findAll(eventAdminSearchParamSpec(params), params.getPageable());
 
         List<EventFullDto> result = searched.stream()
+                .limit(params.getSize())
                 .map(eventMapper::toFullDto)
                 .toList();
-        eventStatsEnricherService.enrichWithStatsEventFullDto(result);
+        enrichWithStatsEventFullDto(result);
         return result;
     }
 
@@ -160,17 +165,15 @@ public class EventService {
             throw new ConflictException("To late to change event");
         }
         updateNouNullFields(event, updateRequest);
-        if (updateRequest.getStateAction() == AdminEventAction.PUBLISH_EVENT) {
-            event.setState(EventState.PUBLISHED);
+        event.setState(updateRequest.getStateAction() == AdminEventAction.PUBLISH_EVENT ? EventState.PUBLISHED : EventState.CANCELED);
+        if (event.getState() == EventState.PUBLISHED &&
+            updateRequest.getStateAction() == AdminEventAction.PUBLISH_EVENT) {
             event.setPublishedOn(LocalDateTime.now());
-        } else if (updateRequest.getStateAction() == AdminEventAction.REJECT_EVENT) {
-            event.setState(EventState.CANCELED);
         }
-
         Event updated = eventRepository.save(event);
 
         EventFullDto dto = eventMapper.toFullDto(updated);
-        eventStatsEnricherService.enrichWithStats(dto);
+        enrichWithStats(dto);
 
         return dto;
     }
@@ -179,6 +182,58 @@ public class EventService {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new NotFoundException("Event id=" + eventId + "not found"));
         return eventMapper.toEventShotCommentDto(event);
+    }
+
+    public List<EventShortDto> getRecommendationsForUser(Long userId) {
+        List<RecommendedEventProto> recommendationsForUser = analyzerClient.getRecommendationsForUser(UserPredictionsRequestProto.newBuilder()
+                .setUserId(userId)
+                .setMaxResult(10)
+                .build());
+        List<Long> ids = recommendationsForUser.stream().map(RecommendedEventProto::getEventId).toList();
+
+        List<Event> events = eventRepository.findAllById(ids);
+        List<EventShortDto> eventShortDtos = events.stream().map(eventMapper::toShortDto).collect(Collectors.toList());
+        enrichWithStatsEventShortDto(eventShortDtos);
+        eventShortDtos.sort(Comparator.comparingDouble(EventShortDto::getRating).reversed());
+        return eventShortDtos;
+    }
+
+    @ClientErrorHandler
+    private void enrichWithStats(EventFullDto dto) {
+        Long eventId = dto.getId();
+        Map<Long, Long> confirmedRequests = requestClient.countRequestsByEventIdsAndStatus(List.of(eventId),
+                RequestStatus.CONFIRMED);
+
+        List<RecommendedEventProto> ratings = analyzerClient.getInteractionsCount(InteractionsCountRequestProto.newBuilder()
+                .addAllEventId(List.of(dto.getId()))
+                .build());
+        Double rating = ratings == null ? 0. : ratings.getFirst() == null ? 0. : ratings.getFirst().getScore();
+        dto.setRating(rating);
+        dto.setConfirmedRequests(confirmedRequests.get(eventId));
+    }
+
+    @ClientErrorHandler
+    private void enrichWithStatsEventFullDto(List<EventFullDto> dtos) {
+        List<Long> ids = dtos.stream().map(EventFullDto::getId).toList();
+        Map<Long, Double> ratings = getRatings(ids);
+        Map<Long, Long> confirmedRequests = requestClient.countRequestsByEventIdsAndStatus(ids,
+                RequestStatus.CONFIRMED);
+        dtos.forEach(dto -> {
+            dto.setConfirmedRequests(confirmedRequests.get(dto.getId()) == null ? 0 : confirmedRequests.get(dto.getId()));
+            dto.setRating(ratings.get(dto.getId()) == null ? 0 : ratings.get(dto.getId()));
+        });
+    }
+
+    @ClientErrorHandler
+    private void enrichWithStatsEventShortDto(List<EventShortDto> dtos) {
+        List<Long> ids = dtos.stream().map(EventShortDto::getId).toList();
+        Map<Long, Double> ratings = getRatings(ids);
+        Map<Long, Long> confirmedRequests = requestClient.countRequestsByEventIdsAndStatus(ids,
+                RequestStatus.CONFIRMED);
+        dtos.forEach(dto -> {
+            dto.setConfirmedRequests(confirmedRequests.get(dto.getId()) == null ? 0 : confirmedRequests.get(dto.getId()));
+            dto.setRating(ratings.get(dto.getId()) == null ? 0 : ratings.get(dto.getId()));
+        });
     }
 
     private void updateNouNullFields(Event eventToUpdate, UpdateEventRequest event) {
@@ -194,5 +249,14 @@ public class EventService {
         if (event.getParticipantLimit() != null) eventToUpdate.setParticipantLimit(event.getParticipantLimit());
         if (event.getRequestModeration() != null) eventToUpdate.setRequestModeration(event.getRequestModeration());
         if (event.getTitle() != null) eventToUpdate.setTitle(event.getTitle());
+    }
+
+    private Map<Long, Double> getRatings(List<Long> eventIds) {
+        return analyzerClient.getInteractionsCount(InteractionsCountRequestProto.newBuilder()
+                        .addAllEventId(eventIds)
+                        .build())
+                .stream()
+                .collect(toMap(RecommendedEventProto::getEventId, RecommendedEventProto::getScore));
+
     }
 }
