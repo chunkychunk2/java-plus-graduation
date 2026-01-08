@@ -21,7 +21,6 @@
         <module>stats/stats-dto</module>
         <module>stats/stats-client</module>
         <module>core</module>
-        <module>core/main-service</module>
     </modules>
 
     <groupId>ru.practicum</groupId>
@@ -46,8 +45,9 @@
         <avro-maven-plugin.version>${avro.version}</avro-maven-plugin.version>
         <protobuf-plugin.version>2.4.0</protobuf-plugin.version>
 
-        <org.mapstruct.version>1.5.5.Final</org.mapstruct.version>
+        <org.mapstruct.version>1.6.3</org.mapstruct.version>
         <org.projectlombok.version>1.18.30</org.projectlombok.version>
+        <lombok-mapstruct-binding.version>0.2.0</lombok-mapstruct-binding.version>
         <org.zalando.version>3.7.2</org.zalando.version>
 	</properties>
 
@@ -148,7 +148,6 @@
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-compiler-plugin</artifactId>
-                    <version>3.11.0</version>
                     <configuration>
                         <annotationProcessorPaths>
                             <path>
@@ -164,15 +163,10 @@
                             <path>
                                 <groupId>org.projectlombok</groupId>
                                 <artifactId>lombok-mapstruct-binding</artifactId>
-                                <version>0.2.0</version>
+                                <version>${lombok-mapstruct-binding.version}</version>
                             </path>
                         </annotationProcessorPaths>
                     </configuration>
-                </plugin>
-                <plugin>
-                    <groupId>org.apache.maven.plugins</groupId>
-                    <artifactId>maven-compiler-plugin</artifactId>
-                    <version>${maven-compiler-plugin.version}</version>
                 </plugin>
                 <plugin>
                     <groupId>org.apache.avro</groupId>
