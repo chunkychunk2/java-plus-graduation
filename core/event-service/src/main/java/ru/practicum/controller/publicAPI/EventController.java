@@ -7,13 +7,16 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 import ru.practicum.aop.ClientErrorHandler;
+import ru.practicum.client.CollectorClient;
 import ru.practicum.client.CommentClient;
-import ru.practicum.client.StatsClient;
-import ru.practicum.dto.HitDto;
+import ru.practicum.client.RequestClient;
 import ru.practicum.dto.comment.CommentWithUserDto;
 import ru.practicum.dto.event.EventFullDto;
 import ru.practicum.dto.event.EventShortDto;
 import ru.practicum.dto.event.SortSearchParam;
+import ru.practicum.dto.request.RequestStatus;
+import ru.practicum.ewm.stats.proto.ActionTypeProto;
+import ru.practicum.ewm.stats.proto.UserActionProto;
 import ru.practicum.exception.BadRequestException;
 import ru.practicum.parameters.PublicSearchParam;
 import ru.practicum.service.EventService;
@@ -30,7 +33,8 @@ public class EventController {
 
     private final EventService eventService;
     private final CommentClient commentClient;
-    private final StatsClient statsClient;
+    private final CollectorClient collectorClient;
+    private final RequestClient requestClient;
 
     @GetMapping
     public List<EventShortDto> getEvents(
@@ -58,12 +62,6 @@ public class EventController {
                 text, categories, paid, rangeStart, rangeEnd, sort, from, size,
                 request.getRemoteAddr(), request.getRequestURI(), timestamp);
 
-        statsClient.postHit(HitDto.builder()
-                .app("ewm-main-service")
-                .uri(request.getRequestURI())
-                .ip(request.getRemoteAddr())
-                .timestamp(timestamp)
-                .build());
 
         PublicSearchParam param = PublicSearchParam.builder()
                 .text(text)
@@ -84,17 +82,16 @@ public class EventController {
     }
 
     @GetMapping("/{id}")
-    public EventFullDto getEventById(@PathVariable Long id, HttpServletRequest request) {
+    public EventFullDto getEventById(@PathVariable Long id, HttpServletRequest request, @RequestHeader("X-EWM-USER-ID") Long userId) {
 
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
 
         log.info("GET /events/{}: ip={}, uri={}, ts={}", id, request.getRemoteAddr(), request.getRequestURI(), timestamp);
 
-        statsClient.postHit(HitDto.builder()
-                .app("ewm-main-service")
-                .uri(request.getRequestURI())
-                .ip(request.getRemoteAddr())
-                .timestamp(timestamp)
+        collectorClient.collectUserAction(UserActionProto.newBuilder()
+                .setEventId(id)
+                .setUserId(userId)
+                .setActionType(ActionTypeProto.ACTION_VIEW)
                 .build());
 
         EventFullDto event = eventService.getPublishedEventById(id);
@@ -109,5 +106,24 @@ public class EventController {
                                                          @RequestParam(defaultValue = "10") Integer size) {
         log.info("Returned comments to event id={}", eventId);
         return commentClient.getCommentsByEventId(eventId, from, size);
+    }
+
+    @GetMapping("/recommendations")
+    public List<EventShortDto> getRecommendationsForUser(@RequestHeader("X-EWM-USER-ID") Long userId) {
+        return eventService.getRecommendationsForUser(userId);
+    }
+
+    @PostMapping("/{eventId}/like")
+    public void likeEvent(@PathVariable Long eventId, @RequestHeader("X-EWM-USER-ID") Long userId) {
+        boolean isConfirmed = requestClient.existsByRequesterAndEventAndStatus(userId, eventId, RequestStatus.CONFIRMED);
+        if (isConfirmed) {
+            collectorClient.collectUserAction(UserActionProto.newBuilder()
+                    .setEventId(eventId)
+                    .setUserId(userId)
+                    .setActionType(ActionTypeProto.ACTION_LIKE)
+                    .build());
+        } else {
+            throw new BadRequestException("Only participants can like the event");
+        }
     }
 }

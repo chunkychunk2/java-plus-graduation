@@ -1,0 +1,39 @@
+spring:
+
+  #data
+  sql:
+    init:
+      mode: always
+  datasource:
+    driverClassName: "org.postgresql.Driver"
+    url: "jdbc:postgresql://localhost:5433/recommendations_analyzer_db"
+    username: "postgres"
+    password: "postgres"
+  jpa:
+    show-sql: true
+    "properties.hibernate.format_sql": true
+
+  #kafka
+  kafka:
+    bootstrap-server: "localhost:9092"
+    producer:
+      key-serializer: "org.apache.kafka.common.serialization.LongSerializer"
+      value-serializer: "ru.practicum.avro.serialization.AvroSerializer"
+
+event-similarity.consumer:
+  group-id: "similarity.analyzer.group"
+user-action.consumer:
+  group-id: "user-action.analyzer.group"
+
+topic:
+  user-actions: "stats.user-actions.v1"
+  events-similarity: "stats.events-similarity.v1"
+
+grpc:
+  server:
+    port: 0
+
+weights:
+  like: 1.0
+  register: 0.8
+  view: 0.4
